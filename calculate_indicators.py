@@ -62,29 +62,66 @@ def calculate_rvol(volume_series, period=5):
     rvol = volume_series / avg_volume
     return rvol
 
-def calculate_premarket_rvol(current_premarket_volume, historical_premarket_volumes):
+def calculate_premarket_rvol_from_excel(df, current_idx, premarket_col, date_col, period=5):
     """
-    計算盤前相對成交量 (Premarket RVOL)
+    從 Excel 資料中計算盤前 RVOL
     
-    RVOL = 今日盤前成交量 / 過去 5 日平均盤前成交量
+    需要當日及過去 N 天的盤前成交量資料
     
     參數:
-        current_premarket_volume: 今日盤前成交量
-        historical_premarket_volumes: 過去 5 日盤前成交量列表
+        df: DataFrame
+        current_idx: 當前行索引
+        premarket_col: 盤前成交量欄位名稱
+        date_col: 日期欄位名稱
+        period: 計算平均的天數（預設 5 天）
     
     返回:
-        盤前 RVOL
+        盤前 RVOL 或 None
     """
-    if not historical_premarket_volumes or len(historical_premarket_volumes) == 0:
+    try:
+        # 獲取當日盤前成交量
+        current_volume = df.loc[current_idx, premarket_col]
+        
+        if pd.isna(current_volume) or current_volume <= 0:
+            return None
+        
+        # 獲取當日日期
+        current_date = pd.to_datetime(df.loc[current_idx, date_col])
+        
+        # 獲取同一股票的歷史資料
+        ticker = df.loc[current_idx, '公司代碼']
+        same_ticker = df[df['公司代碼'] == ticker]
+        
+        # 找出當日之前的資料
+        historical = same_ticker[pd.to_datetime(same_ticker[date_col]) < current_date]
+        
+        # 按日期排序，取最近的 N 天
+        historical = historical.sort_values(by=date_col, ascending=False).head(period)
+        
+        # 獲取歷史盤前成交量
+        historical_volumes = historical[premarket_col].dropna()
+        
+        # 過濾掉 <= 0 的值
+        historical_volumes = historical_volumes[historical_volumes > 0]
+        
+        if len(historical_volumes) == 0:
+            print(f"    ⚠ 警告: 找不到過去 {period} 天的盤前成交量資料")
+            return None
+        
+        if len(historical_volumes) < period:
+            print(f"    ⚠ 警告: 只有 {len(historical_volumes)} 天的歷史盤前成交量（建議至少 {period} 天）")
+        
+        # 計算平均
+        avg_volume = historical_volumes.mean()
+        
+        # 計算 RVOL
+        rvol = current_volume / avg_volume
+        
+        return rvol
+        
+    except Exception as e:
+        print(f"    ✗ 計算盤前 RVOL 時發生錯誤: {str(e)}")
         return None
-    
-    avg_premarket_volume = sum(historical_premarket_volumes) / len(historical_premarket_volumes)
-    
-    if avg_premarket_volume == 0:
-        return None
-    
-    rvol = current_premarket_volume / avg_premarket_volume
-    return rvol
 
 def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30):
     """
@@ -260,16 +297,17 @@ if __name__ == "__main__":
         # 計算 RVOL（如果有盤前成交量資料）
         rvol_value = None
         if has_premarket_volume and premarket_volume_col in df.columns:
-            current_premarket = row.get(premarket_volume_col)
-            if not pd.isna(current_premarket) and current_premarket > 0:
-                # 需要獲取過去 5 日的盤前成交量
-                # 這裡簡化處理，使用 yfinance 的全日成交量作為替代
-                # 實際應用中應該使用真實的盤前成交量資料
-                print(f"  ⚠ 盤前成交量功能需要歷史盤前資料，目前使用全日成交量替代")
-                rvol_value = result.get("RVOL") if result else None
-            else:
+            # 嘗試從 Excel 計算盤前 RVOL
+            rvol_value = calculate_premarket_rvol_from_excel(
+                df, idx, premarket_volume_col, date_col, period=5
+            )
+            
+            if rvol_value is None:
+                # 如果無法計算盤前 RVOL，使用全日成交量作為替代
+                print(f"  ⚠ 無法計算盤前 RVOL，使用全日成交量替代")
                 rvol_value = result.get("RVOL") if result else None
         else:
+            # 使用全日成交量
             rvol_value = result.get("RVOL") if result else None
         
         if result and len(result["RSI_5天"]) > 0:
