@@ -42,9 +42,26 @@ def calculate_adx(high, low, close, period=14):
     
     return adx
 
+def calculate_rvol(volume_series, period=5):
+    """
+    計算相對成交量 (RVOL)
+    
+    RVOL = 當日成交量 / 過去 N 天平均成交量
+    
+    參數:
+        volume_series: 成交量序列
+        period: 計算平均的天數（預設 5 天）
+    
+    返回:
+        RVOL 序列
+    """
+    avg_volume = volume_series.rolling(window=period).mean()
+    rvol = volume_series / avg_volume
+    return rvol
+
 def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30):
     """
-    計算指定股票在開盤日期之前的 RSI 和 ADX 序列（過去的資料）
+    計算指定股票在開盤日期之前的 RSI、ADX 和 RVOL（過去的資料）
     
     參數:
         ticker: 股票代碼 (例如: "NVDA")
@@ -53,7 +70,7 @@ def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30):
         days_30: 30天序列長度
     
     返回:
-        dict: 包含 RSI 和 ADX 的 5 天和 30 天序列（從最近到最遠）
+        dict: 包含 RSI、ADX、RVOL 的序列和開盤日當天的 RVOL
     """
     try:
         # 確保日期格式正確
@@ -89,6 +106,9 @@ def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30):
         # 計算 ADX (14)
         df["ADX"] = calculate_adx(df["High"], df["Low"], df["Close"], period=14)
         
+        # 計算 RVOL (5 天平均)
+        df["RVOL"] = calculate_rvol(df["Volume"], period=5)
+        
         # 找到開盤日期當天或之前的資料（包含開盤日期當天）
         df_before_start = df[df.index <= start_date]
         
@@ -98,6 +118,7 @@ def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30):
         # 取得序列（移除 NaN 值）
         rsi_series = df_before_start["RSI"].dropna()
         adx_series = df_before_start["ADX"].dropna()
+        rvol_series = df_before_start["RVOL"].dropna()
         
         # 取得最近的 5 天和 30 天序列（從最遠到最近）
         # tail() 取最後 N 筆，保持原始順序（從舊到新）
@@ -106,11 +127,15 @@ def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30):
         adx_5 = adx_series.tail(days_5).tolist()
         adx_30 = adx_series.tail(days_30).tolist()
         
+        # 取得開盤日當天的 RVOL（最新的一筆）
+        rvol_current = rvol_series.iloc[-1] if len(rvol_series) > 0 else None
+        
         return {
             "RSI_5天": rsi_5,
             "RSI_30天": rsi_30,
             "ADX_5天": adx_5,
             "ADX_30天": adx_30,
+            "RVOL": rvol_current,  # 開盤日當天的相對成交量
             "實際資料天數": len(rsi_series)
         }
     
@@ -151,10 +176,11 @@ if __name__ == "__main__":
     rsi_30_col = '1個月 RSI 序列'
     adx_5_col = '5天 ADX 序列'
     adx_30_col = '1個月 ADX 序列'
+    rvol_col = '相對成交量 (RVOL)'
     
     # 找到欄位索引
     col_indices = {}
-    for col_name in [rsi_5_col, rsi_30_col, adx_5_col, adx_30_col]:
+    for col_name in [rsi_5_col, rsi_30_col, adx_5_col, adx_30_col, rvol_col]:
         if col_name in df.columns:
             col_indices[col_name] = df.columns.get_loc(col_name) + 1  # Excel 列從 1 開始
     
@@ -177,13 +203,14 @@ if __name__ == "__main__":
             skipped_count += 1
             continue
         
-        # 檢查是否已經計算過（所有四個欄位都有資料且不是空序列）
+        # 檢查是否已經計算過（所有欄位都有資料且不是空序列）
         has_rsi_5 = not pd.isna(row[rsi_5_col]) and str(row[rsi_5_col]).strip() not in ['', '[]', 'nan']
         has_rsi_30 = not pd.isna(row[rsi_30_col]) and str(row[rsi_30_col]).strip() not in ['', '[]', 'nan']
         has_adx_5 = not pd.isna(row[adx_5_col]) and str(row[adx_5_col]).strip() not in ['', '[]', 'nan']
         has_adx_30 = not pd.isna(row[adx_30_col]) and str(row[adx_30_col]).strip() not in ['', '[]', 'nan']
+        has_rvol = not pd.isna(row[rvol_col]) and str(row[rvol_col]).strip() not in ['', 'nan']
         
-        if has_rsi_5 and has_rsi_30 and has_adx_5 and has_adx_30:
+        if has_rsi_5 and has_rsi_30 and has_adx_5 and has_adx_30 and has_rvol:
             print(f"跳過第 {idx + 1} 筆: {ticker} (日期: {date}) - 已有計算結果")
             skipped_count += 1
             continue
@@ -200,12 +227,15 @@ if __name__ == "__main__":
                 rsi_5_col: str(result["RSI_5天"]),
                 rsi_30_col: str(result["RSI_30天"]),
                 adx_5_col: str(result["ADX_5天"]),
-                adx_30_col: str(result["ADX_30天"])
+                adx_30_col: str(result["ADX_30天"]),
+                rvol_col: result["RVOL"] if result["RVOL"] is not None else ""
             }
             
             print(f"  ✓ 完成 (實際資料: {result['實際資料天數']} 天)")
             if len(result['RSI_5天']) >= 3:
                 print(f"  RSI 5天前3筆: {[round(x, 2) for x in result['RSI_5天'][:3]]}")
+            if result["RVOL"] is not None:
+                print(f"  RVOL: {round(result['RVOL'], 2)}")
             processed_count += 1
         else:
             print(f"  ✗ 失敗或無資料")
