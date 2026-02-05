@@ -136,16 +136,30 @@ if __name__ == "__main__":
     print(f"Excel 欄位: {df.columns.tolist()}")
     print(f"共有 {len(df)} 筆資料\n")
     
-    # 使用正確的欄位名稱
+    # 使用正確的欄位名稱（支援多種格式）
     ticker_col = '公司代碼'
-    date_col = '開盤日期(台灣時間)'
+    
+    # 嘗試找到日期欄位（支援多種名稱）
+    date_col = None
+    possible_date_cols = ['開盤日期(台灣時間)', '開盤日期', '日期', '交易日期']
+    for col in possible_date_cols:
+        if col in df.columns:
+            date_col = col
+            break
     
     # 檢查欄位是否存在
-    if ticker_col not in df.columns or date_col not in df.columns:
-        print(f"錯誤: 找不到必要欄位")
-        print(f"需要的欄位: '{ticker_col}' 和 '{date_col}'")
+    if ticker_col not in df.columns:
+        print(f"錯誤: 找不到 '{ticker_col}' 欄位")
         print(f"現有欄位: {df.columns.tolist()}")
         exit(1)
+    
+    if date_col is None:
+        print(f"錯誤: 找不到日期欄位")
+        print(f"支援的日期欄位名稱: {possible_date_cols}")
+        print(f"現有欄位: {df.columns.tolist()}")
+        exit(1)
+    
+    print(f"使用欄位: 股票代碼='{ticker_col}', 日期='{date_col}'\n")
     
     # 更新對應的欄位
     rsi_5_col = '5天 RSI 序列'
