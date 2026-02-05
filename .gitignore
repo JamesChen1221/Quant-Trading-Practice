@@ -47,10 +47,11 @@ Thumbs.db
 *.swp
 *.swo
 
-# 資料檔案（可選：如果不想追蹤 Excel 資料）
-# 量化交易.xlsx
-# 交易資料*.xlsx
+# 資料檔案（避免上傳敏感資料到 GitHub）
+量化交易.xlsx
+交易資料*.xlsx
+*.xlsx
 
-# 測試和範例檔案
-交易資料範例.xlsx
-交易資料_結果.xlsx
+# 但保留範例檔案（如果有的話）
+!範例*.xlsx
+!example*.xlsx
