@@ -13,13 +13,33 @@
 
 ## 🚀 快速開始
 
-### 安裝依賴
+### 1. 安裝依賴
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 執行程式
+### 2. 建立資料檔案
+
+**方法 A：使用範本建立工具（推薦）**
+
+```bash
+python create_template.py
+```
+
+這會建立一個包含所有必要欄位的 `量化交易.xlsx` 檔案。
+
+**方法 B：手動建立**
+
+參考 [範例資料說明.md](範例資料說明.md) 手動建立 Excel 檔案。
+
+### 3. 填入資料
+
+在 `量化交易.xlsx` 的「資料庫」工作表中填入：
+- 開盤日期(台灣時間)：如 2026-02-03
+- 公司代碼：如 NVDA, AAPL, TSLA
+
+### 4. 執行程式
 
 ```bash
 python calculate_indicators.py
@@ -30,19 +50,33 @@ python calculate_indicators.py
 2. 計算每支股票的 RSI 和 ADX 序列
 3. 將結果寫回 Excel（保留原有格式）
 
+## ⚠️ 重要提醒
+
+**資料檔案不會上傳到 GitHub**
+
+- `量化交易.xlsx` 已加入 `.gitignore`
+- 你的交易資料只保存在本地
+- 從 GitHub 下載專案後需要自行建立資料檔案
+
+詳細說明請參考：[範例資料說明.md](範例資料說明.md)
+
 ## 📁 檔案結構
 
 ```
 .
 ├── calculate_indicators.py          # 主程式
+├── create_template.py               # 建立 Excel 範本工具
 ├── requirements.txt                 # Python 套件依賴
-├── 量化交易.xlsx                    # 資料檔案
+├── 量化交易.xlsx                    # 資料檔案（不會上傳到 GitHub）
+├── README.md                        # 本檔案
 ├── 使用說明.md                      # 一般使用說明
 ├── 執行說明.md                      # 執行指南
+├── 範例資料說明.md                  # Excel 資料檔案說明
 ├── 技術說明_RSI_ADX計算.md          # 技術細節和公式
 ├── 更新說明.md                      # 更新記錄
 ├── 格式保留說明.md                  # Excel 格式保留說明
-└── README.md                        # 本檔案
+├── Git使用指南.md                   # Git 完整教學
+└── Git快速參考.md                   # Git 快速參考
 ```
 
 ## 📊 資料格式
@@ -69,11 +103,14 @@ python calculate_indicators.py
 
 ## 📖 詳細文件
 
+- **[範例資料說明.md](範例資料說明.md)** - Excel 資料檔案結構和建立方法
 - **[使用說明.md](使用說明.md)** - 基本使用方式
 - **[執行說明.md](執行說明.md)** - 執行指南和注意事項
 - **[技術說明_RSI_ADX計算.md](技術說明_RSI_ADX計算.md)** - 計算公式和邏輯
 - **[格式保留說明.md](格式保留說明.md)** - Excel 格式保留技術
 - **[更新說明.md](更新說明.md)** - 版本更新記錄
+- **[Git使用指南.md](Git使用指南.md)** - Git 完整教學
+- **[Git快速參考.md](Git快速參考.md)** - Git 常用指令
 
 ## 💡 使用範例
 
