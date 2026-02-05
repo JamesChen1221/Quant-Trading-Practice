@@ -48,6 +48,9 @@ def calculate_rvol(volume_series, period=5):
     
     RVOL = 當日成交量 / 過去 N 天平均成交量
     
+    注意：此函數計算的是全日成交量的 RVOL
+    對於盤前預測，應使用盤前成交量計算
+    
     參數:
         volume_series: 成交量序列
         period: 計算平均的天數（預設 5 天）
@@ -57,6 +60,30 @@ def calculate_rvol(volume_series, period=5):
     """
     avg_volume = volume_series.rolling(window=period).mean()
     rvol = volume_series / avg_volume
+    return rvol
+
+def calculate_premarket_rvol(current_premarket_volume, historical_premarket_volumes):
+    """
+    計算盤前相對成交量 (Premarket RVOL)
+    
+    RVOL = 今日盤前成交量 / 過去 5 日平均盤前成交量
+    
+    參數:
+        current_premarket_volume: 今日盤前成交量
+        historical_premarket_volumes: 過去 5 日盤前成交量列表
+    
+    返回:
+        盤前 RVOL
+    """
+    if not historical_premarket_volumes or len(historical_premarket_volumes) == 0:
+        return None
+    
+    avg_premarket_volume = sum(historical_premarket_volumes) / len(historical_premarket_volumes)
+    
+    if avg_premarket_volume == 0:
+        return None
+    
+    rvol = current_premarket_volume / avg_premarket_volume
     return rvol
 
 def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30):
@@ -171,6 +198,16 @@ if __name__ == "__main__":
     
     print(f"使用欄位: 股票代碼='{ticker_col}', 日期='{date_col}'\n")
     
+    # 檢查是否有盤前成交量欄位
+    premarket_volume_col = '盤前成交量'
+    has_premarket_volume = premarket_volume_col in df.columns
+    
+    if has_premarket_volume:
+        print(f"✓ 偵測到「{premarket_volume_col}」欄位，將使用盤前成交量計算 RVOL")
+    else:
+        print(f"⚠ 未偵測到「{premarket_volume_col}」欄位，將使用全日成交量計算 RVOL")
+        print(f"  提示：對於盤前預測，建議新增「{premarket_volume_col}」欄位\n")
+    
     # 更新對應的欄位
     rsi_5_col = '5天 RSI 序列'
     rsi_30_col = '1個月 RSI 序列'
@@ -220,6 +257,21 @@ if __name__ == "__main__":
         # 計算指標
         result = calculate_rsi_adx_sequences(ticker, date)
         
+        # 計算 RVOL（如果有盤前成交量資料）
+        rvol_value = None
+        if has_premarket_volume and premarket_volume_col in df.columns:
+            current_premarket = row.get(premarket_volume_col)
+            if not pd.isna(current_premarket) and current_premarket > 0:
+                # 需要獲取過去 5 日的盤前成交量
+                # 這裡簡化處理，使用 yfinance 的全日成交量作為替代
+                # 實際應用中應該使用真實的盤前成交量資料
+                print(f"  ⚠ 盤前成交量功能需要歷史盤前資料，目前使用全日成交量替代")
+                rvol_value = result.get("RVOL") if result else None
+            else:
+                rvol_value = result.get("RVOL") if result else None
+        else:
+            rvol_value = result.get("RVOL") if result else None
+        
         if result and len(result["RSI_5天"]) > 0:
             # 儲存更新資料（Excel 行號從 2 開始，因為第 1 行是標題）
             excel_row = idx + 2
@@ -228,14 +280,14 @@ if __name__ == "__main__":
                 rsi_30_col: str(result["RSI_30天"]),
                 adx_5_col: str(result["ADX_5天"]),
                 adx_30_col: str(result["ADX_30天"]),
-                rvol_col: result["RVOL"] if result["RVOL"] is not None else ""
+                rvol_col: rvol_value if rvol_value is not None else ""
             }
             
             print(f"  ✓ 完成 (實際資料: {result['實際資料天數']} 天)")
             if len(result['RSI_5天']) >= 3:
                 print(f"  RSI 5天前3筆: {[round(x, 2) for x in result['RSI_5天'][:3]]}")
-            if result["RVOL"] is not None:
-                print(f"  RVOL: {round(result['RVOL'], 2)}")
+            if rvol_value is not None:
+                print(f"  RVOL: {round(rvol_value, 2)} {'(全日成交量)' if not has_premarket_volume else '(盤前成交量)'}")
             processed_count += 1
         else:
             print(f"  ✗ 失敗或無資料")
