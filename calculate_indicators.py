@@ -42,7 +42,7 @@ def calculate_adx(high, low, close, period=14):
     
     return adx
 
-def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30):
+def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30, days_180=120):
     """
     計算指定股票在開盤日期之前的 RSI、ADX（過去的資料）
     
@@ -51,6 +51,7 @@ def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30):
         start_date: 開盤日期 (字串或 datetime)
         days_5: 5天序列長度
         days_30: 30天序列長度
+        days_180: 6個月序列長度（約120個交易日）
     
     返回:
         dict: 包含 RSI、ADX 的序列
@@ -60,8 +61,8 @@ def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30):
         if isinstance(start_date, str):
             start_date = pd.to_datetime(start_date)
         
-        # 計算需要抓取的日期範圍
-        fetch_start = start_date - timedelta(days=90)
+        # 計算需要抓取的日期範圍（需要更多資料以計算 6 個月序列）
+        fetch_start = start_date - timedelta(days=250)  # 約 8 個月前，確保有足夠交易日
         fetch_end = start_date + timedelta(days=1)
         
         # 下載股票資料
@@ -90,24 +91,29 @@ def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30):
         # 找到開盤日期當天或之前的資料
         df_before_start = df[df.index <= start_date]
         
-        if len(df_before_start) < days_30:
-            print(f"  警告: {ticker} 在 {start_date.date()} 之前的資料不足 {days_30} 天")
+        if len(df_before_start) < days_180:
+            print(f"  警告: {ticker} 在 {start_date.date()} 之前的資料不足 {days_180} 天")
         
         # 取得序列（移除 NaN 值）
         rsi_series = df_before_start["RSI"].dropna()
         adx_series = df_before_start["ADX"].dropna()
         
-        # 取得最近的 5 天和 30 天序列（從最遠到最近）
-        rsi_5 = rsi_series.tail(days_5).tolist()
-        rsi_30 = rsi_series.tail(days_30).tolist()
-        adx_5 = adx_series.tail(days_5).tolist()
-        adx_30 = adx_series.tail(days_30).tolist()
+        # 取得最近的 5 天、30 天和 120 天序列（從最遠到最近）
+        # 四捨五入到 1 位小數
+        rsi_5 = [round(x, 1) for x in rsi_series.tail(days_5).tolist()]
+        rsi_30 = [round(x, 1) for x in rsi_series.tail(days_30).tolist()]
+        rsi_180 = [round(x, 1) for x in rsi_series.tail(days_180).tolist()]
+        adx_5 = [round(x, 1) for x in adx_series.tail(days_5).tolist()]
+        adx_30 = [round(x, 1) for x in adx_series.tail(days_30).tolist()]
+        adx_180 = [round(x, 1) for x in adx_series.tail(days_180).tolist()]
         
         return {
             "RSI_5天": rsi_5,
             "RSI_30天": rsi_30,
+            "RSI_180天": rsi_180,
             "ADX_5天": adx_5,
             "ADX_30天": adx_30,
+            "ADX_180天": adx_180,
             "實際資料天數": len(rsi_series)
         }
     
@@ -124,8 +130,8 @@ if __name__ == "__main__":
     print("美股技術指標計算系統 - RSI & ADX")
     print("="*60)
     print("\n計算指標：")
-    print("  ✓ RSI (相對強弱指標) - 5天和30天序列")
-    print("  ✓ ADX (平均趨向指標) - 5天和30天序列")
+    print("  ✓ RSI (相對強弱指標) - 5天、30天和6個月序列")
+    print("  ✓ ADX (平均趨向指標) - 5天、30天和6個月序列")
     print("\n資料來源：Yahoo Finance (免費)")
     print("="*60 + "\n")
     
@@ -164,12 +170,14 @@ if __name__ == "__main__":
     # 更新對應的欄位
     rsi_5_col = '5天 RSI 序列'
     rsi_30_col = '1個月 RSI 序列'
+    rsi_180_col = '6個月 RSI 序列'
     adx_5_col = '5天 ADX 序列'
     adx_30_col = '1個月 ADX 序列'
+    adx_180_col = '6個月 ADX 序列'
     
     # 找到欄位索引
     col_indices = {}
-    for col_name in [rsi_5_col, rsi_30_col, adx_5_col, adx_30_col]:
+    for col_name in [rsi_5_col, rsi_30_col, rsi_180_col, adx_5_col, adx_30_col, adx_180_col]:
         if col_name in df.columns:
             col_indices[col_name] = df.columns.get_loc(col_name) + 1
     
@@ -195,10 +203,12 @@ if __name__ == "__main__":
         # 檢查是否已經計算過
         has_rsi_5 = not pd.isna(row[rsi_5_col]) and str(row[rsi_5_col]).strip() not in ['', '[]', 'nan']
         has_rsi_30 = not pd.isna(row[rsi_30_col]) and str(row[rsi_30_col]).strip() not in ['', '[]', 'nan']
+        has_rsi_180 = not pd.isna(row[rsi_180_col]) and str(row[rsi_180_col]).strip() not in ['', '[]', 'nan']
         has_adx_5 = not pd.isna(row[adx_5_col]) and str(row[adx_5_col]).strip() not in ['', '[]', 'nan']
         has_adx_30 = not pd.isna(row[adx_30_col]) and str(row[adx_30_col]).strip() not in ['', '[]', 'nan']
+        has_adx_180 = not pd.isna(row[adx_180_col]) and str(row[adx_180_col]).strip() not in ['', '[]', 'nan']
         
-        if has_rsi_5 and has_rsi_30 and has_adx_5 and has_adx_30:
+        if has_rsi_5 and has_rsi_30 and has_rsi_180 and has_adx_5 and has_adx_30 and has_adx_180:
             print(f"跳過第 {idx + 1} 筆: {ticker} (日期: {date}) - 已有計算結果")
             skipped_count += 1
             continue
@@ -214,15 +224,19 @@ if __name__ == "__main__":
             updates[excel_row] = {
                 rsi_5_col: str(result["RSI_5天"]),
                 rsi_30_col: str(result["RSI_30天"]),
+                rsi_180_col: str(result["RSI_180天"]),
                 adx_5_col: str(result["ADX_5天"]),
-                adx_30_col: str(result["ADX_30天"])
+                adx_30_col: str(result["ADX_30天"]),
+                adx_180_col: str(result["ADX_180天"])
             }
             
             print(f"  ✓ 完成 (實際資料: {result['實際資料天數']} 天)")
             if len(result['RSI_5天']) >= 3:
-                print(f"  RSI 5天前3筆: {[round(x, 2) for x in result['RSI_5天'][:3]]}")
+                print(f"  RSI 5天前3筆: {result['RSI_5天'][:3]}")
             if len(result['ADX_5天']) >= 3:
-                print(f"  ADX 5天前3筆: {[round(x, 2) for x in result['ADX_5天'][:3]]}")
+                print(f"  ADX 5天前3筆: {result['ADX_5天'][:3]}")
+            if len(result['RSI_180天']) > 0:
+                print(f"  6個月序列長度: RSI={len(result['RSI_180天'])}, ADX={len(result['ADX_180天'])}")
             processed_count += 1
         else:
             print(f"  ✗ 失敗或無資料")
@@ -264,9 +278,7 @@ if __name__ == "__main__":
         print("沒有需要更新的資料。")
     
     print("\n提示：")
-    print("  - 序列排序為從最遠到最近 [第5天前, ..., 第1天前]")
+    print("  - 序列排序為從最遠到最近 [第N天前, ..., 第1天前]")
     print("  - RSI > 70: 超買，RSI < 30: 超賣")
     print("  - ADX > 25: 強趨勢，ADX < 20: 弱趨勢")
-    print("\n如需盤前 RVOL 功能，請參考：")
-    print("  - Polygon.io API ($29/月)")
-    print("  - 或手動輸入模式（免費）")
+    print("  - 6個月序列約包含 120 個交易日的資料")
