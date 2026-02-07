@@ -4,6 +4,117 @@ from datetime import datetime, timedelta
 import openpyxl
 import numpy as np
 
+def calculate_intraday_prices(ticker, trade_date):
+    """
+    計算盤中價格指標（僅限最近 7 天）
+    
+    指標：
+    - 開盤價
+    - 10分鐘最低價（開盤後 10 分鐘內的最低價）
+    - 1.5小時最高價（開盤 10 分鐘後 ~ 1.5 小時的最高價）
+    - 最高價前的最低價（開盤 10 分鐘後 ~ 1.5小時最高價時間點的最低價）
+    
+    參數:
+        ticker: 股票代號
+        trade_date: 交易日期（美國時間）
+    
+    返回:
+        dict: 包含各項價格指標，如果無法獲取則返回 None
+    """
+    try:
+        # 確保日期格式正確
+        if isinstance(trade_date, str):
+            trade_date = pd.to_datetime(trade_date)
+        
+        # 檢查是否在最近 7 天內
+        days_ago = (datetime.now() - trade_date).days
+        if days_ago > 7:
+            print(f"  ⚠ {trade_date.strftime('%Y-%m-%d')} 超過 7 天，無法獲取盤中數據（yfinance 限制）")
+            return None
+        
+        # 下載分鐘級數據
+        print(f"  正在下載 {ticker} 的盤中數據...")
+        
+        # 設定日期範圍（當天）
+        start = trade_date.strftime("%Y-%m-%d")
+        end = (trade_date + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        # 下載 1 分鐘數據
+        df = yf.download(ticker, start=start, end=end, interval="1m", progress=False)
+        
+        if df.empty:
+            print(f"  ⚠ 無法獲取 {ticker} 在 {start} 的盤中數據")
+            return None
+        
+        # 處理多層索引
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        
+        # 確保有必要的欄位
+        if 'Open' not in df.columns or 'High' not in df.columns or 'Low' not in df.columns:
+            print(f"  ⚠ 數據不完整")
+            return None
+        
+        # 確保數據是一維的
+        for col in ['Open', 'High', 'Low', 'Close']:
+            if col in df.columns and df[col].ndim > 1:
+                df[col] = df[col].iloc[:, 0]
+        
+        # 美股開盤時間：9:30 AM ET
+        # 假設數據已經是 ET 時區
+        
+        # 1. 開盤價（第一根 K 棒的開盤價）
+        open_price = df['Open'].iloc[0] if len(df) > 0 else None
+        
+        # 2. 10分鐘最低價（開盤後 10 分鐘內，即前 10 根 1 分鐘 K 棒）
+        first_10_min = df.head(10)
+        low_10min = first_10_min['Low'].min() if len(first_10_min) > 0 else None
+        
+        # 3. 1.5小時最高價（開盤 10 分鐘後 ~ 1.5 小時，即第 11 根到第 90 根 K 棒）
+        # 10 分鐘 = 10 根，1.5 小時 = 90 根
+        after_10min_to_90min = df.iloc[10:90] if len(df) > 10 else pd.DataFrame()
+        
+        if len(after_10min_to_90min) > 0:
+            high_90min = after_10min_to_90min['High'].max()
+            # 找到最高價的時間點（索引位置）
+            high_90min_idx = after_10min_to_90min['High'].idxmax()
+            
+            # 4. 最高價前的最低價（開盤 10 分鐘後 ~ 最高價時間點的最低價）
+            # 找到最高價在原始 df 中的位置
+            high_position = df.index.get_loc(high_90min_idx)
+            
+            # 如果最高價出現在第 11 根 K 棒（索引 10），表示開盤後立即達到高點
+            if high_position == 10:
+                print(f"  ⚠ 最高價出現在開盤後第 11 分鐘，設為最高價（開盤後立即達到高點）")
+                low_before_high = high_90min
+            elif high_position > 10:
+                # 從第 11 根（索引 10）到最高價位置（包含）
+                before_high = df.iloc[10:high_position+1]
+                low_before_high = before_high['Low'].min() if len(before_high) > 0 else high_90min
+            else:
+                # 理論上不應該發生（因為我們從第 11 根開始找）
+                print(f"  ⚠ 異常：最高價位置 {high_position} < 10")
+                low_before_high = high_90min
+        else:
+            high_90min = None
+            low_before_high = None
+        
+        # 檢查是否有足夠的數據
+        if len(df) < 90:
+            print(f"  ⚠ 數據不足 90 分鐘（只有 {len(df)} 分鐘）")
+        
+        return {
+            "開盤價": round(open_price, 2) if open_price else None,
+            "10分鐘最低價": round(low_10min, 2) if low_10min else None,
+            "1.5小時最高價": round(high_90min, 2) if high_90min else None,
+            "最高價前的最低價": round(low_before_high, 2) if low_before_high else None,
+            "數據分鐘數": len(df)
+        }
+    
+    except Exception as e:
+        print(f"  ✗ 獲取盤中數據時發生錯誤: {str(e)}")
+        return None
+
 def calculate_price_distance(close_prices, current_price, days):
     """
     計算當前價格距離過去 N 天最高/最低價的百分比
@@ -189,6 +300,8 @@ if __name__ == "__main__":
     print("  ✓ RSI (相對強弱指標) - 5天、30天和6個月序列")
     print("  ✓ ADX (平均趨向指標) - 5天、30天和6個月序列")
     print("  ✓ 價格距離 - 昨日收盤價距離過去高低點的百分比")
+    print("  ✓ 盤中價格 - 開盤價、10分鐘最低價、1.5小時最高價等")
+    print("    ⚠ 盤中數據僅限最近 7 天（yfinance 免費版限制）")
     print("\n資料來源：Yahoo Finance (免費)")
     print("="*60 + "\n")
     
@@ -244,6 +357,18 @@ if __name__ == "__main__":
         '昨日收盤價': ('昨日收盤價', None)  # 支援兩種名稱
     }
     
+    # 盤中價格欄位（可選）
+    intraday_price_cols = {
+        '*開盤價格': ('盤中價格', '開盤價'),
+        '開盤價格': ('盤中價格', '開盤價'),
+        '*10分鐘最低價': ('盤中價格', '10分鐘最低價'),
+        '10分鐘最低價': ('盤中價格', '10分鐘最低價'),
+        '*1.5小時最高價': ('盤中價格', '1.5小時最高價'),
+        '1.5小時最高價': ('盤中價格', '1.5小時最高價'),
+        '*最高價前的最低價': ('盤中價格', '最高價前的最低價'),
+        '最高價前的最低價': ('盤中價格', '最高價前的最低價')
+    }
+    
     # 找到欄位索引
     col_indices = {}
     for col_name in [rsi_5_col, rsi_30_col, rsi_180_col, adx_5_col, adx_30_col, adx_180_col]:
@@ -252,6 +377,11 @@ if __name__ == "__main__":
     
     # 找到價格距離欄位索引
     for col_name in price_dist_cols.keys():
+        if col_name in df.columns:
+            col_indices[col_name] = df.columns.get_loc(col_name) + 1
+    
+    # 找到盤中價格欄位索引
+    for col_name in intraday_price_cols.keys():
         if col_name in df.columns:
             col_indices[col_name] = df.columns.get_loc(col_name) + 1
     
@@ -274,7 +404,7 @@ if __name__ == "__main__":
             skipped_count += 1
             continue
         
-        # 檢查是否已經計算過
+        # 檢查 RSI/ADX 是否已經計算過
         has_rsi_5 = not pd.isna(row[rsi_5_col]) and str(row[rsi_5_col]).strip() not in ['', '[]', 'nan']
         has_rsi_30 = not pd.isna(row[rsi_30_col]) and str(row[rsi_30_col]).strip() not in ['', '[]', 'nan']
         has_rsi_180 = not pd.isna(row[rsi_180_col]) and str(row[rsi_180_col]).strip() not in ['', '[]', 'nan']
@@ -282,55 +412,100 @@ if __name__ == "__main__":
         has_adx_30 = not pd.isna(row[adx_30_col]) and str(row[adx_30_col]).strip() not in ['', '[]', 'nan']
         has_adx_180 = not pd.isna(row[adx_180_col]) and str(row[adx_180_col]).strip() not in ['', '[]', 'nan']
         
-        if has_rsi_5 and has_rsi_30 and has_rsi_180 and has_adx_5 and has_adx_30 and has_adx_180:
-            print(f"跳過第 {idx + 1} 筆: {ticker} (日期: {date}) - 已有計算結果")
+        # 檢查是否需要計算 RSI/ADX
+        need_rsi_adx = not (has_rsi_5 and has_rsi_30 and has_rsi_180 and has_adx_5 and has_adx_30 and has_adx_180)
+        
+        # 檢查是否需要計算價格距離（檢查昨日收盤價欄位）
+        need_price_dist = False
+        yesterday_close_col = '*昨日收盤價' if '*昨日收盤價' in df.columns else '昨日收盤價'
+        if yesterday_close_col in df.columns:
+            has_yesterday_close = not pd.isna(row[yesterday_close_col]) and str(row[yesterday_close_col]).strip() not in ['', 'nan']
+            need_price_dist = not has_yesterday_close
+        
+        # 檢查是否需要計算盤中數據（檢查開盤價欄位）
+        need_intraday = False
+        open_price_col = '*開盤價格' if '*開盤價格' in df.columns else '開盤價格'
+        if open_price_col in df.columns:
+            has_open_price = not pd.isna(row[open_price_col]) and str(row[open_price_col]).strip() not in ['', 'nan']
+            need_intraday = not has_open_price
+        
+        # 如果所有資料都已經有了，跳過
+        if not need_rsi_adx and not need_price_dist and not need_intraday:
+            print(f"跳過第 {idx + 1} 筆: {ticker} (日期: {date}) - 所有資料已完整")
             skipped_count += 1
             continue
         
         print(f"處理第 {idx + 1} 筆: {ticker} (日期: {date})")
         
-        # 計算指標
-        result = calculate_rsi_adx_sequences(ticker, date)
+        # 初始化結果
+        result = None
+        intraday_data = None
         
-        if result and len(result["RSI_5天"]) > 0:
-            # 儲存更新資料
-            excel_row = idx + 2
-            updates[excel_row] = {
+        # 只在需要時計算 RSI/ADX 和價格距離
+        if need_rsi_adx or need_price_dist:
+            result = calculate_rsi_adx_sequences(ticker, date)
+            if not result:
+                print(f"  ✗ 無法獲取股價資料")
+                failed_count += 1
+                print()
+                continue
+        
+        # 只在需要時計算盤中數據
+        if need_intraday:
+            intraday_data = calculate_intraday_prices(ticker, date)
+        
+        # 儲存更新資料
+        excel_row = idx + 2
+        updates[excel_row] = {}
+        
+        # 只在需要時更新 RSI/ADX
+        if need_rsi_adx and result and len(result["RSI_5天"]) > 0:
+            updates[excel_row].update({
                 rsi_5_col: str(result["RSI_5天"]),
                 rsi_30_col: str(result["RSI_30天"]),
                 rsi_180_col: str(result["RSI_180天"]),
                 adx_5_col: str(result["ADX_5天"]),
                 adx_30_col: str(result["ADX_30天"]),
                 adx_180_col: str(result["ADX_180天"])
-            }
-            
-            # 新增價格距離資料（如果欄位存在）
+            })
+        
+        # 只在需要時更新價格距離
+        if need_price_dist and result:
             for col_name, (result_key, sub_key) in price_dist_cols.items():
                 if col_name in col_indices and result_key in result:
                     if sub_key:
-                        # 需要從字典中取值
                         if result[result_key]:
                             updates[excel_row][col_name] = result[result_key][sub_key]
                     else:
-                        # 直接取值
                         updates[excel_row][col_name] = result[result_key]
+        
+        # 只在需要時更新盤中價格
+        if need_intraday and intraday_data:
+            for col_name, (result_key, sub_key) in intraday_price_cols.items():
+                if col_name in col_indices and sub_key in intraday_data:
+                    if intraday_data[sub_key] is not None:
+                        updates[excel_row][col_name] = intraday_data[sub_key]
+        
+        # 顯示處理結果
+        if updates[excel_row]:  # 如果有任何更新
+            print(f"  ✓ 完成")
             
-            print(f"  ✓ 完成 (實際資料: {result['實際資料天數']} 天)")
-            if len(result['RSI_5天']) >= 3:
-                print(f"  RSI 5天前3筆: {result['RSI_5天'][:3]}")
-            if len(result['ADX_5天']) >= 3:
-                print(f"  ADX 5天前3筆: {result['ADX_5天'][:3]}")
+            if need_rsi_adx and result:
+                print(f"    - RSI/ADX 已更新 (實際資料: {result['實際資料天數']} 天)")
+                if len(result['RSI_5天']) >= 3:
+                    print(f"    - RSI 5天前3筆: {result['RSI_5天'][:3]}")
             
-            # 顯示價格距離資訊
-            if '價格距離_5日' in result and result['價格距離_5日']:
-                print(f"  昨日收盤價: ${result['昨日收盤價']}")
-                print(f"  5日距離: 高 {result['價格距離_5日']['距離最高價(%)']}%, 低 {result['價格距離_5日']['距離最低價(%)']}%")
+            if need_price_dist and result:
+                if '價格距離_5日' in result and result['價格距離_5日']:
+                    print(f"    - 昨日收盤價: ${result['昨日收盤價']}")
+                    print(f"    - 5日距離: 高 {result['價格距離_5日']['距離最高價(%)']}%, 低 {result['價格距離_5日']['距離最低價(%)']}%")
             
-            if len(result['RSI_180天']) > 0:
-                print(f"  6個月序列長度: RSI={len(result['RSI_180天'])}, ADX={len(result['ADX_180天'])}")
+            if need_intraday and intraday_data:
+                print(f"    - 盤中數據: 開盤 ${intraday_data['開盤價']}, 10分鐘低 ${intraday_data['10分鐘最低價']}")
+            
             processed_count += 1
         else:
-            print(f"  ✗ 失敗或無資料")
+            print(f"  ⚠ 無可用資料")
             failed_count += 1
         
         print()
@@ -361,22 +536,36 @@ if __name__ == "__main__":
                     col_idx = col_indices[col_name]
                     cell = ws.cell(row=excel_row, column=col_idx)
                     
-                    # 保存原有格式
-                    original_font = copy(cell.font)
-                    original_alignment = copy(cell.alignment)
-                    original_border = copy(cell.border)
-                    original_fill = copy(cell.fill)
-                    original_number_format = cell.number_format
+                    # 策略：尋找同一欄位中已有手動輸入資料的儲存格作為格式參考
+                    # 如果找不到，則從同一行的「公司代碼」欄位複製格式
+                    reference_cell = None
                     
-                    # 更新值
+                    # 先嘗試在同一欄位中找到已有資料的儲存格（往上找最多 20 行）
+                    for ref_row in range(max(2, excel_row - 20), excel_row):
+                        ref_cell = ws.cell(row=ref_row, column=col_idx)
+                        if ref_cell.value is not None and str(ref_cell.value).strip() not in ['', 'nan']:
+                            reference_cell = ref_cell
+                            break
+                    
+                    # 如果找不到，使用同一行的「公司代碼」欄位
+                    if reference_cell is None:
+                        ticker_col_idx = df.columns.get_loc('公司代碼') + 1
+                        reference_cell = ws.cell(row=excel_row, column=ticker_col_idx)
+                    
+                    # 使用 copy() 完整複製參考格式（包括顏色、粗體等所有屬性）
+                    if reference_cell.font:
+                        cell.font = copy(reference_cell.font)
+                    if reference_cell.alignment:
+                        cell.alignment = copy(reference_cell.alignment)
+                    if reference_cell.border:
+                        cell.border = copy(reference_cell.border)
+                    if reference_cell.fill:
+                        cell.fill = copy(reference_cell.fill)
+                    if reference_cell.number_format:
+                        cell.number_format = reference_cell.number_format
+                    
+                    # 最後更新值（在設定格式之後）
                     cell.value = value
-                    
-                    # 恢復格式
-                    cell.font = original_font
-                    cell.alignment = original_alignment
-                    cell.border = original_border
-                    cell.fill = original_fill
-                    cell.number_format = original_number_format
         
         # 儲存工作簿
         wb.save(input_file)
