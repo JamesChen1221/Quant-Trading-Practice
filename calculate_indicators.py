@@ -4,6 +4,39 @@ from datetime import datetime, timedelta
 import openpyxl
 import numpy as np
 
+def calculate_price_distance(close_prices, current_price, days):
+    """
+    計算當前價格距離過去 N 天最高/最低價的百分比
+    
+    參數:
+        close_prices: 收盤價序列
+        current_price: 當前價格（通常是昨日收盤價）
+        days: 回溯天數
+    
+    返回:
+        dict: 包含距離最高價和最低價的百分比
+    """
+    if len(close_prices) < days:
+        return None
+    
+    # 取最近 N 天的收盤價
+    recent_prices = close_prices.tail(days)
+    
+    # 找出最高價和最低價
+    highest = recent_prices.max()
+    lowest = recent_prices.min()
+    
+    # 計算距離百分比
+    distance_to_high = ((current_price - highest) / highest) * 100
+    distance_to_low = ((current_price - lowest) / lowest) * 100
+    
+    return {
+        "最高價": round(highest, 2),
+        "最低價": round(lowest, 2),
+        "距離最高價(%)": round(distance_to_high, 1),
+        "距離最低價(%)": round(distance_to_low, 1)
+    }
+
 def calculate_rsi(close_prices, period=14):
     """計算 RSI 指標"""
     delta = close_prices.diff()
@@ -44,7 +77,7 @@ def calculate_adx(high, low, close, period=14):
 
 def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30, days_180=120):
     """
-    計算指定股票在開盤日期之前的 RSI、ADX（過去的資料）
+    計算指定股票在開盤日期之前的 RSI、ADX 和價格距離（過去的資料）
     
     參數:
         ticker: 股票代碼 (例如: "NVDA")
@@ -54,7 +87,7 @@ def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30, days_1
         days_180: 6個月序列長度（約120個交易日）
     
     返回:
-        dict: 包含 RSI、ADX 的序列
+        dict: 包含 RSI、ADX 的序列和價格距離
     """
     try:
         # 確保日期格式正確
@@ -91,12 +124,21 @@ def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30, days_1
         # 找到開盤日期當天或之前的資料
         df_before_start = df[df.index <= start_date]
         
+        # 找到開盤日期的前一天（昨日）
+        # 注意：這裡要找開盤日期之前的最後一個交易日
+        df_before_open = df[df.index < start_date]
+        
+        if len(df_before_open) == 0:
+            print(f"  警告: {ticker} 找不到開盤日期之前的資料")
+            return None
+        
         if len(df_before_start) < days_180:
             print(f"  警告: {ticker} 在 {start_date.date()} 之前的資料不足 {days_180} 天")
         
         # 取得序列（移除 NaN 值）
         rsi_series = df_before_start["RSI"].dropna()
         adx_series = df_before_start["ADX"].dropna()
+        close_series = df_before_open["Close"]  # 使用開盤日期之前的收盤價
         
         # 取得最近的 5 天、30 天和 120 天序列（從最遠到最近）
         # 四捨五入到 1 位小數
@@ -107,6 +149,16 @@ def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30, days_1
         adx_30 = [round(x, 1) for x in adx_series.tail(days_30).tolist()]
         adx_180 = [round(x, 1) for x in adx_series.tail(days_180).tolist()]
         
+        # 計算價格距離（使用昨日收盤價 = 開盤日期前一個交易日的收盤價）
+        yesterday_close = close_series.iloc[-1]  # 開盤日期前一個交易日的收盤價
+        yesterday_date = close_series.index[-1]  # 昨日的日期
+        
+        print(f"  昨日日期: {yesterday_date.strftime('%Y-%m-%d')} (美國時間)")
+        
+        price_dist_5 = calculate_price_distance(close_series, yesterday_close, 5)
+        price_dist_30 = calculate_price_distance(close_series, yesterday_close, 30)
+        price_dist_180 = calculate_price_distance(close_series, yesterday_close, 120)
+        
         return {
             "RSI_5天": rsi_5,
             "RSI_30天": rsi_30,
@@ -114,6 +166,10 @@ def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30, days_1
             "ADX_5天": adx_5,
             "ADX_30天": adx_30,
             "ADX_180天": adx_180,
+            "價格距離_5日": price_dist_5,
+            "價格距離_30日": price_dist_30,
+            "價格距離_180日": price_dist_180,
+            "昨日收盤價": round(yesterday_close, 2),
             "實際資料天數": len(rsi_series)
         }
     
@@ -132,6 +188,7 @@ if __name__ == "__main__":
     print("\n計算指標：")
     print("  ✓ RSI (相對強弱指標) - 5天、30天和6個月序列")
     print("  ✓ ADX (平均趨向指標) - 5天、30天和6個月序列")
+    print("  ✓ 價格距離 - 昨日收盤價距離過去高低點的百分比")
     print("\n資料來源：Yahoo Finance (免費)")
     print("="*60 + "\n")
     
@@ -175,9 +232,26 @@ if __name__ == "__main__":
     adx_30_col = '1個月 ADX 序列'
     adx_180_col = '6個月 ADX 序列'
     
+    # 價格距離欄位（可選）
+    price_dist_cols = {
+        '5日高價距離 (%)': ('價格距離_5日', '距離最高價(%)'),
+        '5日低價距離 (%)': ('價格距離_5日', '距離最低價(%)'),
+        '1個月高價距離 (%)': ('價格距離_30日', '距離最高價(%)'),
+        '1個月低價距離 (%)': ('價格距離_30日', '距離最低價(%)'),
+        '6個月高價距離 (%)': ('價格距離_180日', '距離最高價(%)'),
+        '6個月低價距離 (%)': ('價格距離_180日', '距離最低價(%)'),
+        '*昨日收盤價': ('昨日收盤價', None),
+        '昨日收盤價': ('昨日收盤價', None)  # 支援兩種名稱
+    }
+    
     # 找到欄位索引
     col_indices = {}
     for col_name in [rsi_5_col, rsi_30_col, rsi_180_col, adx_5_col, adx_30_col, adx_180_col]:
+        if col_name in df.columns:
+            col_indices[col_name] = df.columns.get_loc(col_name) + 1
+    
+    # 找到價格距離欄位索引
+    for col_name in price_dist_cols.keys():
         if col_name in df.columns:
             col_indices[col_name] = df.columns.get_loc(col_name) + 1
     
@@ -230,11 +304,28 @@ if __name__ == "__main__":
                 adx_180_col: str(result["ADX_180天"])
             }
             
+            # 新增價格距離資料（如果欄位存在）
+            for col_name, (result_key, sub_key) in price_dist_cols.items():
+                if col_name in col_indices and result_key in result:
+                    if sub_key:
+                        # 需要從字典中取值
+                        if result[result_key]:
+                            updates[excel_row][col_name] = result[result_key][sub_key]
+                    else:
+                        # 直接取值
+                        updates[excel_row][col_name] = result[result_key]
+            
             print(f"  ✓ 完成 (實際資料: {result['實際資料天數']} 天)")
             if len(result['RSI_5天']) >= 3:
                 print(f"  RSI 5天前3筆: {result['RSI_5天'][:3]}")
             if len(result['ADX_5天']) >= 3:
                 print(f"  ADX 5天前3筆: {result['ADX_5天'][:3]}")
+            
+            # 顯示價格距離資訊
+            if '價格距離_5日' in result and result['價格距離_5日']:
+                print(f"  昨日收盤價: ${result['昨日收盤價']}")
+                print(f"  5日距離: 高 {result['價格距離_5日']['距離最高價(%)']}%, 低 {result['價格距離_5日']['距離最低價(%)']}%")
+            
             if len(result['RSI_180天']) > 0:
                 print(f"  6個月序列長度: RSI={len(result['RSI_180天'])}, ADX={len(result['ADX_180天'])}")
             processed_count += 1
@@ -258,6 +349,8 @@ if __name__ == "__main__":
         print(f"正在更新 {input_file} 的 '{sheet_name}' 工作表（保留原有格式）...")
         
         from openpyxl import load_workbook
+        from copy import copy
+        
         wb = load_workbook(input_file)
         ws = wb[sheet_name]
         
@@ -267,7 +360,23 @@ if __name__ == "__main__":
                 if col_name in col_indices:
                     col_idx = col_indices[col_name]
                     cell = ws.cell(row=excel_row, column=col_idx)
+                    
+                    # 保存原有格式
+                    original_font = copy(cell.font)
+                    original_alignment = copy(cell.alignment)
+                    original_border = copy(cell.border)
+                    original_fill = copy(cell.fill)
+                    original_number_format = cell.number_format
+                    
+                    # 更新值
                     cell.value = value
+                    
+                    # 恢復格式
+                    cell.font = original_font
+                    cell.alignment = original_alignment
+                    cell.border = original_border
+                    cell.fill = original_fill
+                    cell.number_format = original_number_format
         
         # 儲存工作簿
         wb.save(input_file)
